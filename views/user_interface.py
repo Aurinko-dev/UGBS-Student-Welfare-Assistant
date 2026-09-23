@@ -476,11 +476,6 @@ if user_query:
                 st.markdown(plan)
                 full_reply += f"\n\n**Action plan:**\n{plan}"
 
-        with st.expander("View retrieved sources & relevance scores"):
-            for idx, (doc, score) in enumerate(results, 1):
-                st.markdown(f"**Match #{idx}** (Distance: `{score:.4f}` | Source: `{doc.metadata.get('source', 'N/A')}`)")
-                st.code(doc.page_content.strip(), language="markdown")
-
         top_source = results[0][0].metadata.get("source", "")
         analytics_db.log_interaction(
             _loggable(user_query, category), category, severity, escalated=escalated,
