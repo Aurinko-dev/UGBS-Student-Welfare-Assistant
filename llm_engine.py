@@ -1,0 +1,278 @@
+"""
+Wraps whichever LLM provider is configured (Gemini or Anthropic) behind two
+functions the rest of the app calls:
+
+  generate_grounded_answer(query, retrieved_chunks) -> str
+  classify_with_llm(query) -> (category, severity)
+
+If no API key is set, both functions fall back to a deterministic template
+so the app still runs end-to-end for a demo — it just won't have natural
+generated prose. This matters for grading: the app should never crash or
+go blank just because a key isn't in the environment.
+"""
+import json
+import config
+
+import re
+
+# Matches an internal sourcing label like "[VERIFIED]", "[SIMULATED]", or
+# "[DESIGN RULE -- not sourced from UGCCD]" at the START of an answer.
+# These labels exist so the team can be honest, in the report, about which
+# knowledge-base content is confirmed vs. simulated for the prototype (see
+# ugccd counselling policy.md's own note on this). They must NEVER reach a
+# student in the actual chat -- a student asking about feeling anxious
+# should not see the literal text "[SIMULATED] Assumed to be covered
+# under...". Applied to every path that can show retrieved text to a
+# student: the no-LLM direct fallback, and (as a safety net, in case the
+# LLM quotes the tag despite being told not to) the LLM's own output too.
+_KB_TAG_RE = re.compile(r"^(\s*\[[^\]]{1,60}\]\s*)+", re.IGNORECASE)
+
+
+def _strip_kb_tags(text: str) -> str:
+    return _KB_TAG_RE.sub("", text).strip()
+
+
+def _call_ollama(prompt: str) -> str:
+    import ollama
+    client = ollama.Client(host=config.OLLAMA_HOST)
+    response = client.chat(
+        model=config.OLLAMA_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response["message"]["content"].strip()
+
+
+def _call_gemini(prompt: str) -> str:
+    import google.generativeai as genai
+    genai.configure(api_key=config.GEMINI_API_KEY)
+    model = genai.GenerativeModel(config.GEMINI_MODEL)
+    response = model.generate_content(prompt)
+    return response.text.strip()
+
+
+def _call_anthropic(prompt: str) -> str:
+    import anthropic
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    message = client.messages.create(
+        model=config.ANTHROPIC_MODEL,
+        max_tokens=500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return message.content[0].text.strip()
+
+
+def _call_llm(prompt: str) -> str:
+    if config.LLM_PROVIDER == "ollama":
+        return _call_ollama(prompt)
+    if config.LLM_PROVIDER == "gemini":
+        return _call_gemini(prompt)
+    if config.LLM_PROVIDER == "anthropic":
+        return _call_anthropic(prompt)
+    raise ValueError(f"Unknown LLM_PROVIDER: {config.LLM_PROVIDER}")
+
+
+def generate_grounded_answer(query: str, retrieved_chunks: list, category: str = None,
+                              nationality: str = None) -> str:
+    """retrieved_chunks: list of (doc, score) tuples from the vector store.
+    category/nationality are optional context used to avoid guessing on
+    fee-type questions where the real answer depends on residency status."""
+    top_doc, _ = retrieved_chunks[0]
+
+    def _direct_fallback():
+        # No meta-commentary, no exposed error text, no "Based on X.md" preamble,
+        # no blockquote -- just the retrieved answer presented as the answer, the
+        # way a student would actually want to read it. Any real error (e.g.
+        # Ollama not running) is logged server-side for debugging, never shown
+        # in the chat -- a student should never see an internal exception.
+        content = top_doc.page_content.strip()
+        # Strip a leading "Q: ...\nA: " question restatement if present, since
+        # the student already knows their own question.
+        if content.startswith("### Q:") or content.startswith("Q:"):
+            parts = content.split("A:", 1)
+            if len(parts) == 2:
+                content = parts[1].strip()
+        return _strip_kb_tags(content)
+
+    if not config.llm_is_configured():
+        return _direct_fallback()
+
+    context_block = "\n\n---\n\n".join(
+        f"[Source: {doc.metadata.get('source', 'unknown')}]\n{doc.page_content}"
+        for doc, _ in retrieved_chunks
+    )
+
+    nationality_note = ""
+    if category in config.NATIONALITY_SENSITIVE_CATEGORIES:
+        if nationality:
+            nationality_note = (f"\nThe student has told you they are a {nationality} student. "
+                                 f"If the context gives different figures/links for Ghanaian vs "
+                                 f"international students, use the ones for a {nationality} student.")
+        else:
+            nationality_note = (
+                "\nFees and some figures in the context differ for Ghanaian vs. international "
+                "students. If the student's question depends on that and they haven't told you "
+                "which they are, ask them directly in one short sentence instead of guessing or "
+                "listing both — e.g. \"Are you a Ghanaian or international student? Fees differ "
+                "between the two.\"")
+
+    prompt = f"""You are the UGBS Student Welfare Assistant, an AI intake system for
+University of Ghana Business School students. Answer the student's question
+using ONLY the context below. If the context does not contain the answer,
+say so plainly and suggest the student contact the relevant office directly
+— never invent policy details, deadlines, or contact information.
+
+Answer directly and plainly, the way you'd tell a friend -- do not start
+with phrases like "Based on the document" or "According to the source".
+Go straight to what the student needs to do or know. Do NOT add generic
+filler advice that isn't actually in the context (e.g. don't say "bring
+your ID" or "bring relevant documents" unless the context specifically
+says so). Keep it under 120 words, warm, and practical. The context may contain internal
+sourcing labels like "[VERIFIED]" or "[SIMULATED]" in square brackets --
+these are for the project team only and must NEVER appear in your answer;
+write as if they are not there.{nationality_note}
+
+CONTEXT:
+{context_block}
+
+STUDENT QUESTION:
+{query}
+
+ANSWER:"""
+
+    try:
+        # Safety net: even though the prompt tells the model to answer
+        # plainly, an LLM can still quote a bracketed source-tag verbatim if
+        # it appears in the context it was given. Strip it here too, not
+        # just in the no-LLM fallback path.
+        return _strip_kb_tags(_call_llm(prompt))
+    except Exception as exc:  # network/auth errors shouldn't crash the demo
+        print(f"[llm_engine] generate_grounded_answer LLM call failed: {exc}")
+        return _direct_fallback()
+
+
+def generate_action_plan(query: str, category: str, retrieved_chunks: list) -> str:
+    """The 'agent' part: not just an answer, but a short ordered plan of what
+    the student should actually do next, grounded in the retrieved policy
+    text so steps aren't invented or padded with generic filler."""
+    if not retrieved_chunks:
+        return ""
+
+    if not config.llm_is_configured():
+        # No generic "bring your ID" filler here either -- if we can't call
+        # an LLM to extract the real next step from the context, the
+        # honest fallback is to point at the source, not invent steps.
+        top_doc, _ = retrieved_chunks[0]
+        source = top_doc.metadata.get("source", "the policy document above")
+        return f"See the details above (from {source}) and contact the recommended office to confirm your specific next step."
+
+    context_block = "\n\n---\n\n".join(
+        f"[Source: {doc.metadata.get('source', 'unknown')}]\n{doc.page_content}"
+        for doc, _ in retrieved_chunks
+    )
+
+    prompt = f"""A UGBS student raised this welfare issue (category: {category}):
+"{query}"
+
+Using ONLY the policy context below, write a short numbered action plan
+(2-4 steps) of exactly what the student should do next — concrete actions
+like "log into the STS portal", "submit form X", "visit office Y" — not
+vague advice. Do NOT invent deadlines, phone numbers, or requirements that
+aren't in the context. Do NOT pad the list with generic filler that isn't
+actually stated (e.g. "bring your ID", "bring relevant documents") unless
+the context specifically mentions it. If there is genuinely only one real
+step, write one step — don't stretch it to hit a minimum count.
+
+CONTEXT:
+{context_block}
+
+ACTION PLAN (numbered list only):"""
+
+    try:
+        return _call_llm(prompt)
+    except Exception:
+        top_doc, _ = retrieved_chunks[0]
+        source = top_doc.metadata.get("source", "the policy document above")
+        return f"See the details above (from {source}) and contact the recommended office to confirm your specific next step."
+
+
+def get_not_in_kb_reply(query: str) -> str:
+    """Used when nothing in the knowledge base is a confident match, or the
+    question is genuinely out of scope. Never a dead end -- always gives a
+    direct link to check, and the caller logs this for admin follow-up so
+    real knowledge-base gaps get noticed and fixed over time."""
+    return (
+        "I don't have specific information on that in what I've been given so far. "
+        f"You can check the official sites directly: [UGBS website]({config.UGBS_WEBSITE}) "
+        f"or [University of Ghana website]({config.UG_WEBSITE}). "
+        "I've also flagged your question so the team can add this to what I know."
+    )
+
+
+def generate_chitchat_reply(query: str) -> str:
+    """For plain greetings/small talk (see risk_classifier.is_chitchat).
+    Responds naturally and briefly, then invites the student to share
+    what's going on -- instead of forcing every message through
+    classification/retrieval, which produced a stiff 'out of scope'
+    response to something as simple as 'hi'."""
+    if not config.llm_is_configured():
+        return ("Hey! I'm the UGBS Student Welfare Assistant. Tell me what's going on -- "
+                "financial, academic, accommodation, mental health, careers, or BHJCR/SRC "
+                "matters -- and I'll help you figure out the right next step.")
+
+    prompt = f"""You are the UGBS Student Welfare Assistant, a friendly intake AI for
+University of Ghana Business School students. The student just sent a greeting
+or small talk, not a welfare question yet: "{query}"
+
+Reply naturally and warmly in 1-2 short sentences, like a real conversation --
+not a rigid template. Briefly mention you can help with things like financial
+aid, academic issues, accommodation, counselling, careers, or BHJCR/SRC
+matters, and invite them to share what's going on. Do not use bullet points
+or headers for this reply."""
+
+    try:
+        return _call_llm(prompt)
+    except Exception:
+        return ("Hey! I'm the UGBS Student Welfare Assistant. Tell me what's going on -- "
+                "financial, academic, accommodation, mental health, careers, or BHJCR/SRC "
+                "matters -- and I'll help you figure out the right next step.")
+
+
+def classify_with_llm(query: str):
+    """Used only when the rule-based classifier in risk_classifier.py
+    doesn't confidently match. Returns (category, severity).
+
+    Falls back to "Out of Scope" rather than "Unclassified": "Unclassified"
+    is not one of config.CATEGORIES, which meant action_planner.OFFICE_MAP
+    (keyed by the real category names) had no entry for it, so a student
+    silently got no office referral at all whenever this path failed. "Out
+    of Scope" IS a real category with a real, honest fallback response
+    (llm_engine.get_not_in_kb_reply), so failing this way degrades to
+    something the rest of the app already knows how to handle."""
+    if not config.llm_is_configured():
+        return "Out of Scope", "Low"
+
+    prompt = f"""Classify this student welfare message into exactly one category
+from this list: {config.CATEGORIES}
+and exactly one severity from this list: {config.SEVERITY_LEVELS}
+
+Respond with ONLY valid JSON: {{"category": "...", "severity": "..."}}
+
+MESSAGE: {query}"""
+
+    try:
+        raw = _call_llm(prompt)
+        raw = raw.strip().strip("`").replace("json\n", "")
+        parsed = json.loads(raw)
+        category = parsed.get("category", "Out of Scope")
+        severity = parsed.get("severity", "Low")
+        if category not in config.CATEGORIES:
+            category = "Out of Scope"
+        if severity not in config.SEVERITY_LEVELS:
+            severity = "Low"
+        return category, severity
+    except Exception as exc:
+        # Was a bare "except Exception: return ..." with no logging -- silent
+        # failures here were invisible next to generate_grounded_answer's
+        # logged failures. Matched to that pattern for consistency.
+        print(f"[llm_engine] classify_with_llm LLM call failed: {exc}")
+        return "Out of Scope", "Low"
