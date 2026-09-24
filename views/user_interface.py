@@ -135,6 +135,14 @@ def load_vectorstore():
 
 
 def severity_badge(severity: str) -> str:
+    # Internal/admin use only (e.g. analytics dashboard) -- deliberately NOT
+    # shown to the student. Surfacing a raw "Critical severity" / "High
+    # severity" label risks two failure modes: (1) it reads as a diagnosis
+    # of the student's situation, which this system has no business making,
+    # and (2) it can teach people to soften how they phrase a disclosure to
+    # avoid the label, which is the opposite of what a welfare tool wants.
+    # The severity still fully drives escalation and routing behind the
+    # scenes -- it's just never printed at the student.
     cls = f"badge-{severity.lower()}"
     return f'<span class="badge {cls}">{severity} severity</span>'
 
@@ -507,19 +515,35 @@ if user_query:
             st.markdown(msg)
             analytics_db.log_interaction(_loggable(user_query, category), category, severity,
                                           escalated=escalated,
-                                          classifier_source=classifier_source, needs_review=True)
+                                          classifier_source=classifier_source, needs_review=True,
+                                          escalation_reason=escalation_reason)
             st.session_state.messages.append({"role": "assistant", "content": msg})
             st.stop()
 
         if is_oos:
             classifier_source += " + kb_rescued (classifier said Out of Scope, KB match found)"
         else:
-            badge_html = severity_badge(severity)
-            st.markdown(f'<span class="badge badge-category">{category}</span>{badge_html}', unsafe_allow_html=True)
+            # Category alone is shown (e.g. "Accommodation") so the student
+            # can see the system understood their topic. Severity is not
+            # shown -- see the note on severity_badge().
+            st.markdown(f'<span class="badge badge-category">{category}</span>', unsafe_allow_html=True)
 
         with st.spinner("Generating answer..."):
             answer = llm_engine.generate_grounded_answer(
                 user_query, results, category=category, nationality=st.session_state.nationality)
+
+        # possible_crisis is deliberately soft-escalated: the student sees a
+        # completely normal answer, no emergency screen (that screen is
+        # reserved for the exact-phrase crisis list). But "completely normal"
+        # meant the student got zero acknowledgment that anything concerning
+        # came through, even when a human is now quietly reviewing their
+        # message. One warm, non-alarming line closes that gap without the
+        # weight of the full crisis UI.
+        if escalation_reason == "possible_crisis":
+            answer += ("\n\n---\n*If things ever feel like too much, support is always "
+                       "available — you don't have to wait for it to get worse. "
+                       "You can also reach out any time through the resources in "
+                       "your welfare office.*")
 
         st.markdown(answer)
 
@@ -546,5 +570,6 @@ if user_query:
             top_source=top_source,
             recommended_office=office_info["office"] if office_info else "",
             classifier_source=classifier_source,
+            escalation_reason=escalation_reason,
         )
         st.session_state.messages.append({"role": "assistant", "content": full_reply})

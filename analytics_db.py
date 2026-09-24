@@ -36,7 +36,15 @@ def init_db():
     for col, coltype in (("recommended_office", "TEXT"), ("classifier_source", "TEXT"),
                          ("needs_review", "INTEGER DEFAULT 0"), ("resolved", "INTEGER DEFAULT 0"),
                          ("admin_note", "TEXT"), ("acknowledged", "INTEGER DEFAULT 0"),
-                         ("acknowledged_at", "TEXT"), ("ack_note", "TEXT")):
+                         ("acknowledged_at", "TEXT"), ("ack_note", "TEXT"),
+                         # Previously only appended as free text inside
+                         # classifier_source (e.g. "... | escalated: possible_crisis"),
+                         # which made it impossible to filter/sort the queue by why a
+                         # case was escalated without parsing a log string. Its own
+                         # column lets the admin dashboard group/filter cases by reason
+                         # (e.g. surface "crisis" and "possible_crisis" ahead of
+                         # "low_confidence_sensitive").
+                         ("escalation_reason", "TEXT")):
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE interactions ADD COLUMN {col} {coltype}")
     conn.commit()
@@ -45,14 +53,17 @@ def init_db():
 
 def log_interaction(query: str, category: str, severity: str, escalated: bool,
                      top_source: str = "", recommended_office: str = "",
-                     classifier_source: str = "", needs_review: bool = False):
+                     classifier_source: str = "", needs_review: bool = False,
+                     escalation_reason: str = ""):
     conn = _connect()
     conn.execute(
         "INSERT INTO interactions (timestamp, query, category, severity, escalated, "
-        "top_source, recommended_office, classifier_source, needs_review, resolved) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+        "top_source, recommended_office, classifier_source, needs_review, resolved, "
+        "escalation_reason) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
         (datetime.now().isoformat(), query, category, severity, int(escalated),
-         top_source, recommended_office, classifier_source, int(needs_review)),
+         top_source, recommended_office, classifier_source, int(needs_review),
+         escalation_reason),
     )
     conn.commit()
     conn.close()
@@ -152,6 +163,20 @@ def load_all() -> pd.DataFrame:
 def category_counts(df: pd.DataFrame) -> pd.DataFrame:
     counts = df["category"].value_counts()
     return pd.DataFrame({"category": counts.index, "count": counts.values})
+
+
+def escalation_reason_counts(df: pd.DataFrame) -> pd.DataFrame:
+    """Escalated cases grouped by WHY they were escalated (crisis,
+    possible_crisis, gbv_report, high_severity, possible_high,
+    low_confidence_sensitive...). Lets the dashboard show the queue isn't
+    one undifferentiated pile -- a "crisis" case and a "low_confidence_sensitive"
+    case are not the same kind of urgent."""
+    if df.empty or "escalation_reason" not in df:
+        return pd.DataFrame({"reason": [], "count": []})
+    escalated = df[df["escalated"] == 1]
+    reasons = escalated["escalation_reason"].replace("", "unspecified").fillna("unspecified")
+    counts = reasons.value_counts()
+    return pd.DataFrame({"reason": counts.index, "count": counts.values})
 
 
 def daily_trend(df: pd.DataFrame) -> pd.DataFrame:

@@ -420,9 +420,23 @@ def possible_crisis(text: str) -> bool:
 
 
 # Escalate when the net gives High at least this probability, even if High is
-# not its top prediction. Pick the value from the threshold table that
-# train_classifier.py prints (recall vs. share of messages flagged).
-HIGH_PROB_THRESHOLD = 0.30
+# not its top prediction. Value chosen from the threshold table
+# train_classifier.py prints for the app's actual policy (urgency floor OR
+# P(High) >= cutoff), run on 102 labeled examples (21 truly High):
+#   cutoff | High recall | precision | % of messages flagged
+#    0.10  |   100.0%    |   35.0%   |    58.8%
+#    0.20  |    95.2%    |   44.4%   |    44.1%   <- chosen
+#    0.30  |    90.5%    |   55.9%   |    33.3%   (previous value)
+#    0.40  |    85.7%    |   58.1%   |    30.4%
+# 0.30 missed 2 of 21 truly-High cases in CV; 0.20 misses only 1, at the cost
+# of ~11 more points of messages flagged for review. For this tool, a missed
+# High case is worse than an extra reviewed one, so recall was prioritized
+# over precision -- but not all the way to 0.10, which would flag well over
+# half of all traffic and likely overwhelm a real review queue.
+# CAUTION: only 21 High-severity examples back this table -- each recall
+# point is ~1 case. Re-run train_classifier.py and revisit this once more
+# labeled data exists.
+HIGH_PROB_THRESHOLD = 0.20
 
 
 def _rank(sev: str) -> int:
