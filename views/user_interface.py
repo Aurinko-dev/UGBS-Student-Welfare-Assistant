@@ -71,6 +71,18 @@ def _is_advisor_question(text: str) -> bool:
     lowered = text.lower()
     return any(h in lowered for h in _ADVISOR_HINTS)
 
+# Shown when the knowledge base has no confident answer. The chat is anonymous,
+# so an admin cannot reply here -- the wording says that honestly rather than
+# promising a callback.
+_ADMIN_HANDOFF = (
+    "\n\n---\n"
+    "**I've flagged your question for the UGBS admin team** so the gap can be "
+    "reviewed and the assistant improved. They can't reply in this chat, so for "
+    "a direct answer please contact the relevant office or visit "
+    f"{config.UGBS_WEBSITE}."
+)
+
+
 def _loggable(query: str, category: str) -> str:
     """Same redaction policy as the crisis path: sexual harassment / GBV
     disclosures are never stored verbatim in the dashboard-visible log."""
@@ -149,6 +161,23 @@ TOPICS = {
             "How do I apply to defer my programme?",
             "What happens if I fail a course and need to resit?",
             "How do I register my courses?",
+        ],
+    },
+    "Graduation": {
+        "icon": "📜",
+        "questions": [
+            "How do I know if I have satisfied all the requirements for graduation?",
+            "How do I know I am eligible to graduate?",
+            "How many credit hours do I need to pass to be eligible for graduation?",
+            "How many total credit hours do I need to take to be eligible for graduation?",
+            "Can I graduate with an F in an elective course under the College of Humanities?",
+            "Can I graduate with an E in a core course in the College of Humanities?",
+            "I satisfied all requirements but my name is not on the graduating list.",
+            "I have written all my re-sit courses. How can I be added to the graduation list?",
+            "I completed my course of study last year with some outstanding results. They are now entered but my name isn't on this year's graduating list.",
+            "Can I be part of the graduation ceremony after completing school when I have passed all re-sit papers?",
+            "What should I do when my name does not appear correctly for the online registration for graduation?",
+            "If I fail to participate in matriculation and fail to sign the matriculation oath, will I be allowed to graduate?",
         ],
     },
     "Accommodation": {
@@ -436,16 +465,11 @@ if user_query:
         if escalated:
             classifier_source += f" | escalated: {escalation_reason}"
 
-        if category == "Out of Scope":
-            # Never a dead end: direct link out, and flagged for admin
-            # follow-up so real knowledge-base gaps get noticed.
-            msg = llm_engine.get_not_in_kb_reply(user_query)
-            st.markdown(msg)
-            analytics_db.log_interaction(_loggable(user_query, category), category, severity,
-                                          escalated=escalated,
-                                          classifier_source=classifier_source, needs_review=True)
-            st.session_state.messages.append({"role": "assistant", "content": msg})
-            st.stop()
+        # The classifier saying "Out of Scope" is not final. It only sees the
+        # question's wording, so KB content it was never trained on (IT/portal
+        # help, grading rules, certificates...) can be mislabelled. Search the
+        # knowledge base first; hand off to an admin only if nothing matches.
+        is_oos = category == "Out of Scope"
 
         # --- Stage 2.5: nationality gate for fee-specific questions ---------
         # Only pauses when the question is actually about a number that
@@ -475,6 +499,7 @@ if user_query:
 
         if not results or results[0][1] > CONFIDENCE_THRESHOLD:
             msg = llm_engine.get_not_in_kb_reply(user_query)
+            msg += _ADMIN_HANDOFF
             if escalated:
                 _office = action_planner.get_recommended_office(category)
                 if _office:
@@ -486,8 +511,11 @@ if user_query:
             st.session_state.messages.append({"role": "assistant", "content": msg})
             st.stop()
 
-        badge_html = severity_badge(severity)
-        st.markdown(f'<span class="badge badge-category">{category}</span>{badge_html}', unsafe_allow_html=True)
+        if is_oos:
+            classifier_source += " + kb_rescued (classifier said Out of Scope, KB match found)"
+        else:
+            badge_html = severity_badge(severity)
+            st.markdown(f'<span class="badge badge-category">{category}</span>{badge_html}', unsafe_allow_html=True)
 
         with st.spinner("Generating answer..."):
             answer = llm_engine.generate_grounded_answer(
@@ -499,7 +527,7 @@ if user_query:
         # This is what makes it an agent rather than a Q&A chatbot: it
         # doesn't stop at answering, it recommends a specific office and a
         # concrete next-steps plan.
-        office_info = action_planner.get_recommended_office(category)
+        office_info = None if is_oos else action_planner.get_recommended_office(category)
         full_reply = answer
         if office_info:
             st.markdown(f"**Recommended office:** {office_info['office']}")
