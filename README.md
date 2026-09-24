@@ -1,7 +1,7 @@
 # UGBS Student Welfare Assistant
 
-An AI-based triage and case-management assistant for University of Ghana Business School
-students — built for Scenario 6 (Student Complaints and Administrative Case Management),
+An AI-based triage and referral assistant for University of Ghana Business School
+students — built for Scenario 5 (Student Welfare and Support Services),
 AI Applications in Business.
 
 Answers routine welfare questions grounded in real UG/UGBS policy documents, classifies
