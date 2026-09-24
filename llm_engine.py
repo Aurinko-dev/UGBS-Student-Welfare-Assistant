@@ -159,11 +159,14 @@ def generate_action_plan(query: str, category: str, retrieved_chunks: list) -> s
 
     if not config.llm_is_configured():
         # No generic "bring your ID" filler here either -- if we can't call
-        # an LLM to extract the real next step from the context, the
-        # honest fallback is to point at the source, not invent steps.
-        top_doc, _ = retrieved_chunks[0]
-        source = top_doc.metadata.get("source", "the policy document above")
-        return f"See the details above (from {source}) and contact the recommended office to confirm your specific next step."
+        # an LLM to extract the real next step from the context, the honest
+        # fallback is to point the student to the right office rather than
+        # invent steps. The underlying source file is still available to
+        # admins via analytics_db (top_source, logged separately in
+        # user_interface.py) -- it's just never named in what the student
+        # reads, same as the main LLM path already does.
+        return ("For your exact next step, contact the recommended office directly "
+                "— they'll be able to confirm what applies to your situation.")
 
     context_block = "\n\n---\n\n".join(
         f"[Source: {doc.metadata.get('source', 'unknown')}]\n{doc.page_content}"
@@ -190,9 +193,10 @@ ACTION PLAN (numbered list only):"""
     try:
         return _call_llm(prompt)
     except Exception:
-        top_doc, _ = retrieved_chunks[0]
-        source = top_doc.metadata.get("source", "the policy document above")
-        return f"See the details above (from {source}) and contact the recommended office to confirm your specific next step."
+        # Same as the no-LLM-configured fallback above -- no filename, no
+        # "the details above" pointer, just a plain next step.
+        return ("For your exact next step, contact the recommended office directly "
+                "— they'll be able to confirm what applies to your situation.")
 
 
 def get_not_in_kb_reply(query: str) -> str:
