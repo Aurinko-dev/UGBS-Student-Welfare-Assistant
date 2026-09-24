@@ -229,6 +229,7 @@ if active_topic:
                 st.session_state.active_topic = None
                 st.session_state.show_guidance = False
                 st.rerun()
+
         if TOPICS[active_topic].get("guidance"):
             # The quiz is its own button in the list, not something that
             # renders automatically just because the Programmes panel is
