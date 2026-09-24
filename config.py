@@ -50,6 +50,10 @@ MARKDOWN_FILES = [
     # that overlapped and disagreed with each other. See this file's own
     # closing section for exactly what is confirmed vs. still unresolved.
     "ugbs_offices_and_contacts.md",
+    # STS (sts.ug.edu.gh) FAQs, split by topic so each file retrieves cleanly.
+    "sts_portal_and_payments_faqs.md",
+    "sts_academic_records_and_regulations_faqs.md",
+    "sts_graduation_and_certificates_faqs.md",
 ]
 
 CATEGORIES = [
