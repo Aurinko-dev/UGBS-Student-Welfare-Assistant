@@ -52,7 +52,9 @@ def _clear_chat() -> None:
     st.session_state.nationality = None
     st.session_state.awaiting_nationality = False
     st.session_state.pending_query = None
+    st.session_state.awaiting_department = False
     st.session_state.active_topic = None
+    st.session_state.show_guidance = False
 
 
 with st.sidebar:
