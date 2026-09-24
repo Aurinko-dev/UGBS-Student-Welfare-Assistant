@@ -183,8 +183,6 @@ TOPICS = {
 
 if "active_topic" not in st.session_state:
     st.session_state.active_topic = None
-if "show_program_quiz" not in st.session_state:
-    st.session_state.show_program_quiz = False
 
 # An example question chosen on the previous run is picked up here, so the
 # topic panel can close before the answer is shown.
@@ -213,7 +211,7 @@ for col, (topic_name, topic) in zip(topic_cols, TOPICS.items()):
                      type="primary" if is_open else "secondary",
                      **wide(st.button)):
             st.session_state.active_topic = None if is_open else topic_name
-            st.session_state.show_program_quiz = False
+            st.session_state.show_guidance = False  # always start collapsed
             st.rerun()
 
 active_topic = st.session_state.active_topic
@@ -229,21 +227,19 @@ if active_topic:
             if st.button(question, key=f"ex_{active_topic}_{i}", **wide(st.button)):
                 st.session_state.pending_prompt = question
                 st.session_state.active_topic = None
-                st.session_state.show_program_quiz = False
+                st.session_state.show_guidance = False
                 st.rerun()
-
-        # "What major suits me?" is its own item in the same list, rather than
-        # a chat question -- clicking it toggles the quiz open/closed in place,
-        # the same way the topic buttons above toggle the whole panel.
         if TOPICS[active_topic].get("guidance"):
-            quiz_open = st.session_state.show_program_quiz
-            quiz_label = "🧭  What major suits me?" + (" (close)" if quiz_open else "")
-            if st.button(quiz_label, key=f"quiz_toggle_{active_topic}",
-                         type="primary" if quiz_open else "secondary", **wide(st.button)):
-                st.session_state.show_program_quiz = not quiz_open
+            # The quiz is its own button in the list, not something that
+            # renders automatically just because the Programmes panel is
+            # open -- matches every other entry here being a click-to-open
+            # item, not an always-visible block.
+            is_guidance_open = st.session_state.get("show_guidance", False)
+            if st.button("🧭 What major might suit me? (quick quiz)",
+                        key=f"guidance_toggle_{active_topic}", **wide(st.button)):
+                st.session_state.show_guidance = not is_guidance_open
                 st.rerun()
-
-            if st.session_state.show_program_quiz:
+            if st.session_state.get("show_guidance", False):
                 st.divider()
                 tab_ugbs, tab_all = st.tabs(["UGBS options (Level 200)", "All majors (Humanities Handbook)"])
                 with tab_ugbs:
@@ -283,10 +279,44 @@ if user_query:
         st.markdown(user_query)
 
     with st.chat_message("assistant", avatar=ASSISTANT_AVATAR):
-        # --- Stage 0: resuming a paused nationality question ----------------
-        # If we asked "are you Ghanaian or international?" last turn, this
-        # message IS the answer -- capture it and resume processing the
-        # ORIGINAL question, not this one.
+        # --- Stage 0: crisis check, ALWAYS first, before any pending gate --
+        # A student could be replying to "are you Ghanaian or international?"
+        # -- or they could have sent something unrelated while that gate was
+        # still open (a stray "hi", a new question, or worse, a crisis
+        # message). The gates below must never be able to swallow a crisis
+        # or a greeting, so those checks run first, unconditionally, and
+        # clear any stuck gate before doing anything else.
+        if check_crisis(user_query):
+            st.session_state.awaiting_nationality = False
+            st.session_state.pending_query = None
+            st.session_state.awaiting_department = False
+            crisis_category = rule_based_classify(user_query).category
+            crisis_message = (EMERGENCY_MESSAGE_GBV
+                              if crisis_category == "Sexual Harassment / GBV"
+                              else EMERGENCY_MESSAGE)
+            st.markdown(crisis_message, unsafe_allow_html=True)
+            analytics_db.log_interaction("[crisis message — redacted from log]",
+                                          crisis_category, "Critical",
+                                          escalated=True)
+            st.session_state.messages.append({"role": "assistant", "content": crisis_message})
+            st.stop()
+
+        # --- Stage 0.2: chit-chat, also before any pending gate -------------
+        # A stray "hi" sent while a gate was open must get a normal greeting
+        # reply, not be silently absorbed as the answer to a stale question.
+        if is_chitchat(user_query):
+            st.session_state.awaiting_nationality = False
+            st.session_state.pending_query = None
+            st.session_state.awaiting_department = False
+            reply = llm_engine.generate_chitchat_reply(user_query)
+            st.markdown(reply)
+            st.session_state.messages.append({"role": "assistant", "content": reply})
+            st.stop()
+
+        # --- Stage 0.5: resuming a paused nationality question ----------------
+        # If we asked "are you Ghanaian or international?" last turn, and the
+        # message wasn't a crisis or a greeting (checked above), treat it as
+        # the answer and resume processing the ORIGINAL question, not this one.
         if st.session_state.awaiting_nationality:
             lowered_answer = user_query.lower()
             if "ghana" in lowered_answer:
@@ -301,11 +331,12 @@ if user_query:
             user_query = st.session_state.pending_query
             st.session_state.pending_query = None
 
-        # --- Stage 0.5: resuming a paused course-advisor department question -
-        # If we asked "which department are you in?" last turn, this message
-        # IS the department, not a new question -- answer directly and stop,
-        # rather than running "Accounting" through crisis/classification/
-        # retrieval as if it were a welfare query.
+        # --- Stage 0.7: resuming a paused course-advisor department question -
+        # If we asked "which department are you in?" last turn, and the
+        # message wasn't a crisis or a greeting (checked above), treat it as
+        # the department, not a new question -- answer directly and stop,
+        # rather than running it through crisis/classification/retrieval as
+        # if it were a welfare query.
         if st.session_state.awaiting_department:
             st.session_state.awaiting_department = False
             picked_label = user_query.strip()
@@ -328,7 +359,13 @@ if user_query:
             st.session_state.messages.append({"role": "assistant", "content": msg})
             st.stop()
 
-        # --- Stage 1: deterministic crisis check, before anything else ----
+        # --- Stage 1: deterministic crisis check (again) --------------------
+        # Reaching here means the message was neither crisis nor chit-chat,
+        # AND wasn't consumed by a pending gate above (or WAS a resumed
+        # original question after the nationality gate). This second check
+        # catches that resumed original question, in case IT happens to be
+        # a crisis message -- unlikely, but the same "never let a crisis
+        # message skip the crisis screen" rule applies here too.
         if check_crisis(user_query):
             crisis_category = rule_based_classify(user_query).category
             crisis_message = (EMERGENCY_MESSAGE_GBV
@@ -349,11 +386,9 @@ if user_query:
             st.session_state.messages.append({"role": "assistant", "content": crisis_message})
             st.stop()
 
-        # --- Stage 1.5: plain greeting / small talk -------------------------
-        # Without this, a simple "hi" was forced through classification and
-        # usually landed in "Out of Scope", producing a stiff bureaucratic
-        # reply to a greeting. This is deliberately narrow (see
-        # risk_classifier.is_chitchat) so it can never swallow a real query.
+        # --- Stage 1.5: plain greeting / small talk (again) ------------------
+        # Same reasoning as Stage 1 above -- covers the resumed original
+        # question in the rare case it's itself a greeting.
         if is_chitchat(user_query):
             reply = llm_engine.generate_chitchat_reply(user_query)
             st.markdown(reply)
