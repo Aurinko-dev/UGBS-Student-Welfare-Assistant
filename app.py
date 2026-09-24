@@ -86,3 +86,4 @@ with st.sidebar:
         st.page_link(settings_page)
 
 nav.run()
+# python -m streamlit run app.py
