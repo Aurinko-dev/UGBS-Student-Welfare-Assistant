@@ -166,7 +166,7 @@ def normalize_query(text: str) -> str:
         if len(core) < 4 or core.lower() in _VOCABULARY:
             corrected.append(w)
             continue
-        match = difflib.get_close_matches(core.lower(), _VOCABULARY, n=1, cutoff=0.8)
+        match = difflib.get_close_matches(core.lower(), _VOCABULARY, n=1, cutoff=0.85)
         if match:
             corrected.append(w.replace(core, match[0]))
         else:
