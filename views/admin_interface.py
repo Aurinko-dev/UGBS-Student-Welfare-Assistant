@@ -64,7 +64,7 @@ if df.empty:
     st.info("No interactions logged yet. Ask the assistant a few questions on the User Interface page first.")
     st.stop()
 
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 col1.metric("Total interactions", len(df))
 col2.metric("Escalation rate", f"{analytics_db.escalation_rate(df):.1f}%")
 col3.metric("Distinct categories", df["category"].nunique())
@@ -72,6 +72,11 @@ ack_count = int(((df["escalated"] == 1) & (df.get("acknowledged", 0).fillna(0) =
 col4.metric("Acknowledged escalations", ack_count)
 avg_ack = analytics_db.avg_minutes_to_acknowledge(df)
 col5.metric("Avg. acknowledgement", "—" if avg_ack is None else f"{avg_ack:.1f} min")
+fb = analytics_db.feedback_summary(df)
+col6.metric("Helpfulness",
+            "—" if fb["pct_helpful"] is None else f"{fb['pct_helpful']:.0f}%",
+            help=f"{fb['up']} up · {fb['down']} down · {fb['total']} of {len(df)} "
+                 f"interactions rated" if fb["total"] else "No feedback given yet")
 
 st.divider()
 

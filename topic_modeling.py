@@ -117,5 +117,11 @@ def discover_topics(texts: List[str], n_topics: Optional[int] = None,
             "weight": float(doc_scores[dominant].sum()) if dominant else 0.0,
         })
 
+    # Drop topics with no dominant documents -- these can occur when NMF's
+    # argmax never picks this component for any input, and would otherwise
+    # render as a keyword card claiming "0 question(s) match this theme",
+    # which is confusing rather than useful on an admin dashboard.
+    topics = [t for t in topics if t["doc_indices"]]
+
     topics.sort(key=lambda t: len(t["doc_indices"]), reverse=True)
     return {"ok": True, "topics": topics}

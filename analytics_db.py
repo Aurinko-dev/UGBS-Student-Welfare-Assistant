@@ -44,7 +44,12 @@ def init_db():
                          # column lets the admin dashboard group/filter cases by reason
                          # (e.g. surface "crisis" and "possible_crisis" ahead of
                          # "low_confidence_sensitive").
-                         ("escalation_reason", "TEXT")):
+                         ("escalation_reason", "TEXT"),
+                         # Student-given thumbs up/down on a fully-answered question.
+                         # NULL/empty means no feedback was given -- distinct from a
+                         # "down" vote, so the admin dashboard doesn't need to guess
+                         # whether silence means "fine" or "never asked".
+                         ("feedback", "TEXT")):
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE interactions ADD COLUMN {col} {coltype}")
     conn.commit()
@@ -54,9 +59,12 @@ def init_db():
 def log_interaction(query: str, category: str, severity: str, escalated: bool,
                      top_source: str = "", recommended_office: str = "",
                      classifier_source: str = "", needs_review: bool = False,
-                     escalation_reason: str = ""):
+                     escalation_reason: str = "") -> int:
+    """Returns the new row's id, so the caller (views/user_interface.py) can
+    attach feedback buttons to this specific interaction later in the same
+    chat session -- see log_feedback() below."""
     conn = _connect()
-    conn.execute(
+    cur = conn.execute(
         "INSERT INTO interactions (timestamp, query, category, severity, escalated, "
         "top_source, recommended_office, classifier_source, needs_review, resolved, "
         "escalation_reason) "
@@ -65,6 +73,20 @@ def log_interaction(query: str, category: str, severity: str, escalated: bool,
          top_source, recommended_office, classifier_source, int(needs_review),
          escalation_reason),
     )
+    conn.commit()
+    interaction_id = cur.lastrowid
+    conn.close()
+    return interaction_id
+
+
+def log_feedback(interaction_id: int, value: str):
+    """Student clicked thumbs up/down on a fully-answered question. `value`
+    is "up" or "down". This is the missing half of the assignment's
+    "evaluate usefulness" requirement -- category/severity/escalation data
+    alone can't tell you whether a generated answer was actually any good;
+    only the student asking it can."""
+    conn = _connect()
+    conn.execute("UPDATE interactions SET feedback = ? WHERE id = ?", (value, interaction_id))
     conn.commit()
     conn.close()
 
@@ -182,6 +204,23 @@ def escalation_reason_counts(df: pd.DataFrame) -> pd.DataFrame:
 def daily_trend(df: pd.DataFrame) -> pd.DataFrame:
     daily = df.set_index("timestamp").resample("D").size().reset_index(name="queries")
     return daily
+
+
+def feedback_summary(df: pd.DataFrame) -> dict:
+    """Aggregate thumbs up/down counts and a helpfulness percentage for the
+    admin dashboard. Interactions with no feedback given are excluded from
+    the percentage entirely rather than counted as neutral or negative --
+    most answers will never get a click either way, and folding silence
+    into the rate would make it meaningless."""
+    if df.empty or "feedback" not in df:
+        return {"up": 0, "down": 0, "total": 0, "pct_helpful": None}
+    fb = df["feedback"].dropna()
+    fb = fb[fb != ""]
+    up = int((fb == "up").sum())
+    down = int((fb == "down").sum())
+    total = up + down
+    pct_helpful = (up / total * 100) if total else None
+    return {"up": up, "down": down, "total": total, "pct_helpful": pct_helpful}
 
 
 def escalation_rate(df: pd.DataFrame) -> float:

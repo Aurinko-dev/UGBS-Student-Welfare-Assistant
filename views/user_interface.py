@@ -82,6 +82,26 @@ _ADMIN_HANDOFF = (
 )
 
 
+def _render_feedback(interaction_id: int) -> None:
+    """Thumbs up/down under a fully-answered question. Once given, feedback
+    is locked in as plain text rather than left clickable -- so a student
+    can't repeatedly toggle it, and so the buttons don't reappear as live
+    on every later rerun of this page."""
+    given = st.session_state.feedback_given.get(interaction_id)
+    if given:
+        st.caption("👍 Marked helpful" if given == "up" else "👎 Marked not helpful")
+        return
+    c1, c2, _ = st.columns([1, 1, 10])
+    if c1.button("👍", key=f"fb_up_{interaction_id}"):
+        analytics_db.log_feedback(interaction_id, "up")
+        st.session_state.feedback_given[interaction_id] = "up"
+        st.rerun()
+    if c2.button("👎", key=f"fb_down_{interaction_id}"):
+        analytics_db.log_feedback(interaction_id, "down")
+        st.session_state.feedback_given[interaction_id] = "down"
+        st.rerun()
+
+
 def _loggable(query: str, category: str) -> str:
     """Same redaction policy as the crisis path: sexual harassment / GBV
     disclosures are never stored verbatim in the dashboard-visible log."""
@@ -302,6 +322,8 @@ if "pending_query" not in st.session_state:
     st.session_state.pending_query = None
 if "awaiting_department" not in st.session_state:
     st.session_state.awaiting_department = False
+if "feedback_given" not in st.session_state:
+    st.session_state.feedback_given = {}
 
 for msg in st.session_state.messages:
     avatar = ASSISTANT_AVATAR if msg["role"] == "assistant" else USER_AVATAR
@@ -318,6 +340,8 @@ for msg in st.session_state.messages:
         # flag -- only raw HTML tags need it, and nothing here should be
         # emitting those.
         st.markdown(msg["content"])
+        if msg["role"] == "assistant" and msg.get("interaction_id") is not None:
+            _render_feedback(msg["interaction_id"])
 
 user_query = st.chat_input("Type your question here...") or suggested_prompt
 
@@ -586,11 +610,13 @@ if user_query:
                 full_reply += f"\n\n**Action plan:**\n{plan}"
 
         top_source = results[0][0].metadata.get("source", "")
-        analytics_db.log_interaction(
+        interaction_id = analytics_db.log_interaction(
             _loggable(user_query, category), category, severity, escalated=escalated,
             top_source=top_source,
             recommended_office=office_info["office"] if office_info else "",
             classifier_source=classifier_source,
             escalation_reason=escalation_reason,
         )
-        st.session_state.messages.append({"role": "assistant", "content": full_reply})
+        _render_feedback(interaction_id)
+        st.session_state.messages.append({"role": "assistant", "content": full_reply,
+                                           "interaction_id": interaction_id})
