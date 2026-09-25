@@ -153,6 +153,16 @@ _VOCABULARY = sorted(set(
     if len(w) >= 4
 ))
 
+# Ordinary, unambiguous everyday words that must NEVER be auto-"corrected",
+# no matter how high their fuzzy-match score against something in
+# _VOCABULARY comes out. Found by testing: "talking" scores 0.933 and
+# "taking" scores 0.857 against "stalking" -- both ABOVE the 0.85 cutoff
+# below. An explicit stoplist, checked before any fuzzy match is attempted,
+# is the only reliable fix -- no single cutoff number can keep these words
+# safe without also disabling real, wanted corrections.
+_DO_NOT_CORRECT = {"talking", "taking", "walking", "shaking", "making", "baking",
+                   "waking", "raking", "faking"}
+
 
 def tokenize(text: str) -> list:
     """Splits a raw message into whitespace-delimited tokens. Deliberately
@@ -176,7 +186,7 @@ def correct_tokens(tokens: list) -> list:
     corrected = []
     for w in tokens:
         core = w.strip(".,!?;:")
-        if len(core) < 4 or core.lower() in _VOCABULARY:
+        if len(core) < 4 or core.lower() in _VOCABULARY or core.lower() in _DO_NOT_CORRECT:
             corrected.append(w)
             continue
         match = difflib.get_close_matches(core.lower(), _VOCABULARY, n=1, cutoff=0.85)
