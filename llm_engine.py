@@ -181,6 +181,119 @@ ANSWER:"""
         return _direct_fallback()
 
 
+# Marks the boundary between the answer and the action plan inside a single
+# combined LLM response (see generate_answer_and_plan). Deliberately
+# distinctive so it can't collide with ordinary answer text.
+_PLAN_DELIMITER = "===ACTION_PLAN==="
+
+
+def generate_answer_and_plan(query: str, retrieved_chunks: list, category: str = None,
+                              nationality: str = None) -> tuple:
+    """Produces the grounded answer AND the action plan from a SINGLE LLM
+    call, instead of the two separate sequential calls that
+    generate_grounded_answer() + generate_action_plan() would make. Each
+    local (Ollama) generation can take many seconds on CPU, so making two of
+    them back-to-back for every answered question roughly doubles the
+    student's wait -- this halves it, with no change to what's shown.
+
+    Returns (answer, plan). Falls back to the same template text the two
+    separate functions already use on failure or when no LLM is configured,
+    so behaviour is identical to before in the no-LLM/offline demo case.
+    """
+    top_doc, _ = retrieved_chunks[0]
+
+    def _fallback_answer():
+        content = top_doc.page_content.strip()
+        return _strip_kb_tags(_strip_faq_formatting(content))
+
+    def _fallback_plan():
+        return ("For your exact next step, contact the recommended office directly "
+                "— they'll be able to confirm what applies to your situation.")
+
+    if not config.llm_is_configured():
+        return _fallback_answer(), _fallback_plan()
+
+    context_block = "\n\n---\n\n".join(
+        f"[Source: {doc.metadata.get('source', 'unknown')}]\n{doc.page_content}"
+        for doc, _ in retrieved_chunks
+    )
+
+    nationality_note = ""
+    if category in config.NATIONALITY_SENSITIVE_CATEGORIES:
+        if nationality:
+            nationality_note = (f"\nThe student has told you they are a {nationality} student. "
+                                 f"If the context gives different figures/links for Ghanaian vs "
+                                 f"international students, use the ones for a {nationality} student.")
+        else:
+            nationality_note = (
+                "\nFees and some figures in the context differ for Ghanaian vs. international "
+                "students. If the student's question depends on that and they haven't told you "
+                "which they are, ask them directly in one short sentence instead of guessing or "
+                "listing both — e.g. \"Are you a Ghanaian or international student? Fees differ "
+                "between the two.\"")
+
+    prompt = f"""You are the UGBS Student Welfare Assistant, an AI intake system for
+University of Ghana Business School students. Using ONLY the context below,
+produce TWO things for this student's question: an answer, and a short
+action plan of concrete next steps.
+
+Respond in EXACTLY this format, with nothing before, between, or after the
+two parts other than the delimiter line shown:
+
+<answer text>
+{_PLAN_DELIMITER}
+<action plan text>
+
+For the ANSWER part: answer directly and plainly, the way you'd tell a
+friend -- do not start with phrases like "Based on the document" or
+"According to the source". Go straight to what the student needs to do or
+know. Do NOT add generic filler advice that isn't actually in the context
+(e.g. don't say "bring your ID" or "bring relevant documents" unless the
+context specifically says so). Keep it under 120 words, warm, and
+practical. If the context does not contain the answer, say so plainly and
+suggest the student contact the relevant office directly -- never invent
+policy details, deadlines, or contact information.
+
+For the ACTION PLAN part: write a short numbered list (2-4 steps) of
+exactly what the student should do next -- concrete actions like "log into
+the STS portal", "submit form X", "visit office Y" -- not vague advice. Do
+NOT invent deadlines, phone numbers, or requirements that aren't in the
+context. Do NOT pad the list with generic filler that isn't actually stated
+unless the context specifically mentions it. If there is genuinely only one
+real step, write one step -- don't stretch it to hit a minimum count.
+
+The context may contain internal sourcing labels like "[VERIFIED]" or
+"[SIMULATED]" in square brackets -- these are for the project team only and
+must NEVER appear in either part of your response; write as if they are
+not there.{nationality_note}
+
+CONTEXT:
+{context_block}
+
+STUDENT QUESTION:
+{query}"""
+
+    try:
+        raw = _strip_kb_tags(_call_llm(prompt))
+        if _PLAN_DELIMITER in raw:
+            answer_part, plan_part = raw.split(_PLAN_DELIMITER, 1)
+        else:
+            # Model didn't follow the delimiter format -- treat the whole
+            # response as the answer rather than silently dropping it, and
+            # fall back to the honest "contact the office" plan text.
+            answer_part, plan_part = raw, ""
+        answer_part = answer_part.strip()
+        plan_part = _strip_kb_tags(plan_part.strip())
+        if not answer_part:
+            answer_part = _fallback_answer()
+        if not plan_part:
+            plan_part = _fallback_plan()
+        return answer_part, plan_part
+    except Exception as exc:  # network/auth errors shouldn't crash the demo
+        print(f"[llm_engine] generate_answer_and_plan LLM call failed: {exc}")
+        return _fallback_answer(), _fallback_plan()
+
+
 def generate_action_plan(query: str, category: str, retrieved_chunks: list) -> str:
     """The 'agent' part: not just an answer, but a short ordered plan of what
     the student should actually do next, grounded in the retrieved policy

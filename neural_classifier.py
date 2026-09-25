@@ -66,6 +66,22 @@ def is_available() -> bool:
     return True
 
 
+def get_embedder():
+    """Returns the shared HuggingFaceEmbeddings instance, creating it once.
+    Exposed so user_interface.py's vector store can reuse this exact
+    embedder instead of instantiating all-MiniLM-L6-v2 a second time --
+    previously the same model was loaded into memory twice on every fresh
+    app start (once here, once for retrieval), which is pure wasted startup
+    time since it's the same model both times. Independent of the
+    classifier weights themselves, since retrieval needs the embedder
+    whether or not a trained model is available."""
+    global _embedder
+    if _embedder is None:
+        from langchain_huggingface import HuggingFaceEmbeddings
+        _embedder = HuggingFaceEmbeddings(model_name=config.EMBEDDING_MODEL_NAME)
+    return _embedder
+
+
 def _load():
     global _model, _embedder, _categories, _severities
     if _model is not None:
@@ -80,8 +96,7 @@ def _load():
     _model.load_state_dict(torch.load(config.CLASSIFIER_MODEL_PATH, map_location="cpu"))
     _model.eval()
 
-    from langchain_huggingface import HuggingFaceEmbeddings
-    _embedder = HuggingFaceEmbeddings(model_name=config.EMBEDDING_MODEL_NAME)
+    get_embedder()  # ensures _embedder is set, reusing it if already loaded
 
 
 def classify(text: str):

@@ -5,7 +5,6 @@ from logo import logo_html
 from ui_theme import wide
 import os
 
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
 import config
@@ -128,7 +127,7 @@ You matter, and this is worth a real person's attention, not a chatbot's.
 
 @st.cache_resource(show_spinner=False)
 def load_vectorstore():
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings = neural_classifier.get_embedder()
     if not os.path.exists(config.DB_DIR):
         return None
     return Chroma(persist_directory=config.DB_DIR, embedding_function=embeddings)
@@ -528,9 +527,22 @@ if user_query:
             # shown -- see the note on severity_badge().
             st.markdown(f'<span class="badge badge-category">{category}</span>', unsafe_allow_html=True)
 
-        with st.spinner("Generating answer..."):
-            answer = llm_engine.generate_grounded_answer(
-                user_query, results, category=category, nationality=st.session_state.nationality)
+        # Decided before generating the answer so we know whether a plan is
+        # even needed -- lets us make ONE combined LLM call for the answer
+        # and the action plan together, instead of two sequential ones. Each
+        # local (Ollama) generation can take many seconds on CPU, so this
+        # roughly halves the wait on every fully-answered question.
+        office_info = None if is_oos else action_planner.get_recommended_office(category)
+
+        if office_info:
+            with st.spinner("Generating answer and next steps..."):
+                answer, plan = llm_engine.generate_answer_and_plan(
+                    user_query, results, category=category, nationality=st.session_state.nationality)
+        else:
+            with st.spinner("Generating answer..."):
+                answer = llm_engine.generate_grounded_answer(
+                    user_query, results, category=category, nationality=st.session_state.nationality)
+            plan = ""
 
         # possible_crisis is deliberately soft-escalated: the student sees a
         # completely normal answer, no emergency screen (that screen is
@@ -550,14 +562,12 @@ if user_query:
         # --- Agent step: decide where to route + what to do next -----------
         # This is what makes it an agent rather than a Q&A chatbot: it
         # doesn't stop at answering, it recommends a specific office and a
-        # concrete next-steps plan.
-        office_info = None if is_oos else action_planner.get_recommended_office(category)
+        # concrete next-steps plan. office_info and plan were already
+        # computed above so the answer and plan could come from one LLM call.
         full_reply = answer
         if office_info:
             st.markdown(f"**Recommended office:** {office_info['office']}")
             st.caption(office_info["note"])
-            with st.spinner("Drawing up next steps..."):
-                plan = llm_engine.generate_action_plan(user_query, category, results)
             full_reply += f"\n\n**Recommended office:** {office_info['office']}"
             if plan:
                 st.markdown("**Your action plan:**")

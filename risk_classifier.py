@@ -516,7 +516,7 @@ def finalize_triage(text: str, category: str, severity: str,
     # the emergency screen's stricter exact-phrase bar, and shouldn't claim
     # the same confidence as the urgency floor or crisis lists.
     distress = sentiment_analysis.distress_score(text)
-    if not escalated and sentiment_analysis.is_high_distress(text):
+    if not escalated and distress >= sentiment_analysis.DISTRESS_THRESHOLD:
         notes.append(f"high_distress_sentiment (score {distress:.2f})")
         escalated, reason = True, "high_distress_sentiment"
         if _rank(severity) < _rank("Medium"):
