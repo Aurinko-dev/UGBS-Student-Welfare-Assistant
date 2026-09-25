@@ -3,18 +3,60 @@ import streamlit as st
 from ui_theme import wide
 import plotly.express as px
 import pandas as pd
+import os
 
 import analytics_db
 import topic_modeling
 
+# --- Minimal password gate ---------------------------------------------
+# The warning below was true when this said "no authentication" -- this is
+# the fix for that specific gap before any public deployment. It's still a
+# single shared password, not per-admin accounts or roles, so it belongs in
+# the same "prototype, not production access control" category as the rest
+# of this page: fine for keeping random visitors and search-engine crawlers
+# out of a demo link you're sharing with a supervisor, not a substitute for
+# real authentication (individual logins, audit trail, role separation) in
+# an actual production deployment handling real student welfare data.
+#
+# Set ADMIN_PASSWORD in Streamlit Cloud's Secrets panel (or a local .env /
+# environment variable) before deploying. If it's never set, this page
+# refuses to render at all rather than silently falling open -- an admin
+# page with no password configured is not the same as "no password needed".
+_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+if not _ADMIN_PASSWORD:
+    try:
+        _ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", None)
+    except Exception:
+        # No secrets.toml at all (normal for local dev without one) --
+        # treat the same as "not configured", handled below.
+        _ADMIN_PASSWORD = None
+
+if not _ADMIN_PASSWORD:
+    st.error("Admin access is not configured (ADMIN_PASSWORD is not set). This page is "
+             "locked until an administrator sets it in the app's secrets/environment.")
+    st.stop()
+
+if not st.session_state.get("admin_authenticated", False):
+    st.markdown("## 🔒 Admin sign-in")
+    entered = st.text_input("Admin password", type="password")
+    if st.button("Sign in"):
+        if entered == _ADMIN_PASSWORD:
+            st.session_state.admin_authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
+
 st.markdown("## 📊 Admin Interface")
 st.caption("This is the decision-support view for administrators: what students are asking about, "
            "how demand moves over time, and how often cases needed escalation.")
-st.warning("⚠️ **Prototype only — not production access control.** This dashboard shows raw student "
-           "query text with no authentication or role-based access in front of it. Crisis-flagged "
-           "and sexual-harassment/GBV messages are redacted at the point of logging (see views/user_interface.py), but non-crisis query text is "
-           "still stored in plaintext. A real deployment needs: authenticated admin access, a data "
-           "retention/deletion policy, and a documented legal basis for storing student welfare data.")
+st.warning("⚠️ **Prototype only — not production access control.** A shared password gates this "
+           "page now, but that's still not real per-admin authentication, an audit trail, or role "
+           "separation. Crisis-flagged and sexual-harassment/GBV messages are redacted at the "
+           "point of logging (see views/user_interface.py), but non-crisis query text is still "
+           "stored in plaintext. A real deployment needs: individual authenticated admin accounts, "
+           "a data retention/deletion policy, and a documented legal basis for storing student "
+           "welfare data.")
 
 df = analytics_db.load_all()
 

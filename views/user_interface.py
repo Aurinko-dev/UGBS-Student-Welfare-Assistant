@@ -306,7 +306,18 @@ if "awaiting_department" not in st.session_state:
 for msg in st.session_state.messages:
     avatar = ASSISTANT_AVATAR if msg["role"] == "assistant" else USER_AVATAR
     with st.chat_message(msg["role"], avatar=avatar):
-        st.markdown(msg["content"], unsafe_allow_html=True)
+        # unsafe_allow_html deliberately NOT used here. Every message in this
+        # history is either a student's raw typed input, or an assistant
+        # reply built from that input plus retrieved/LLM-generated text --
+        # neither is fully trusted. Rendering it as real HTML on every rerun
+        # would let a message containing e.g. <img src=x onerror=...> execute
+        # script in this session every time the page reruns, even though the
+        # very same content is shown safely (no HTML execution) the first
+        # time it appears further down in this file. Plain Markdown
+        # (headers, bold, links, lists) still renders correctly without this
+        # flag -- only raw HTML tags need it, and nothing here should be
+        # emitting those.
+        st.markdown(msg["content"])
 
 user_query = st.chat_input("Type your question here...") or suggested_prompt
 
@@ -331,7 +342,7 @@ if user_query:
             crisis_message = (EMERGENCY_MESSAGE_GBV
                               if crisis_category == "Sexual Harassment / GBV"
                               else EMERGENCY_MESSAGE)
-            st.markdown(crisis_message, unsafe_allow_html=True)
+            st.markdown(crisis_message)  # pure Markdown; no HTML needed, see history-loop note above
             analytics_db.log_interaction("[crisis message — redacted from log]",
                                           crisis_category, "Critical",
                                           escalated=True)
@@ -389,7 +400,7 @@ if user_query:
                 msg = (f"For **{matched}**, ask your department office who your current "
                        f"course advisor is -- the assistant doesn't hold a live directory "
                        f"of individual advisors, only which department to contact.")
-            st.markdown(msg, unsafe_allow_html=True)
+            st.markdown(msg)  # pure Markdown; no HTML needed, see history-loop note above
             analytics_db.log_interaction(f"[Course advisor] {picked_label}", "Career Guidance",
                                          "Low", escalated=False,
                                          classifier_source="advisor_department_gate")
@@ -408,7 +419,7 @@ if user_query:
             crisis_message = (EMERGENCY_MESSAGE_GBV
                               if crisis_category == "Sexual Harassment / GBV"
                               else EMERGENCY_MESSAGE)
-            st.markdown(crisis_message, unsafe_allow_html=True)
+            st.markdown(crisis_message)  # pure Markdown; no HTML needed, see history-loop note above
             # Redacted on purpose: this is the single most sensitive category
             # of message the system handles, and the admin dashboard's
             # "escalated cases" table displays the query text verbatim.
