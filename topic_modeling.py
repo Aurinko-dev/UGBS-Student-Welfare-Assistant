@@ -22,8 +22,12 @@ alongside them and catch what they miss.
 """
 from typing import List, Dict, Optional
 
-from sklearn.decomposition import NMF
-from sklearn.feature_extraction.text import TfidfVectorizer
+# sklearn is imported lazily, inside discover_topics(), rather than at
+# module load time. On some locked-down machines (university-managed
+# Windows installs with an Application Control / WDAC policy, for example)
+# sklearn's compiled extensions can be blocked from loading -- if that
+# import happened here at the top of the file, it would take down the
+# entire admin page on startup rather than just this one feature.
 
 # Below this many flagged questions, topic modeling doesn't produce anything
 # meaningful -- too few documents for TF-IDF/NMF to find real co-occurrence
@@ -55,6 +59,17 @@ def discover_topics(texts: List[str], n_topics: Optional[int] = None,
                 "reason": f"Only {len(texts)} flagged question(s) logged so far -- "
                           f"need at least {MIN_DOCUMENTS} before topic patterns are "
                           f"meaningful rather than noise."}
+
+    try:
+        from sklearn.decomposition import NMF
+        from sklearn.feature_extraction.text import TfidfVectorizer
+    except ImportError as e:
+        return {"ok": False,
+                "reason": "Topic modeling needs scikit-learn, which failed to load on this "
+                          "machine (" + str(e) + "). On a university-managed Windows install "
+                          "this is often an Application Control / WDAC policy blocking "
+                          "scikit-learn's compiled files -- ask IT to allowlist the sklearn "
+                          "folder inside this project's venv."}
 
     # Cap topic count sensibly for small corpora: no point asking for more
     # topics than roughly a third of the documents, and never more than 6

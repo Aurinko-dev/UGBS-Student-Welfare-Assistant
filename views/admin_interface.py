@@ -85,7 +85,10 @@ st.caption("Unsupervised topic discovery over the 'needs review' queue below -- 
            "questions even when they don't fit neatly into one of the fixed categories above.")
 if st.button("Find recurring themes"):
     unresolved_for_topics = analytics_db.get_unresolved(df)
-    result = topic_modeling.discover_topics(unresolved_for_topics["query"].tolist())
+    try:
+        result = topic_modeling.discover_topics(unresolved_for_topics["query"].tolist())
+    except Exception as e:
+        result = {"ok": False, "reason": f"Topic modeling failed unexpectedly: {e}"}
     if not result["ok"]:
         st.info(result["reason"])
     else:
