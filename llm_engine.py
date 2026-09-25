@@ -71,6 +71,43 @@ def _call_llm(prompt: str) -> str:
     raise ValueError(f"Unknown LLM_PROVIDER: {config.LLM_PROVIDER}")
 
 
+def _strip_faq_formatting(content: str) -> str:
+    """The knowledge-base .md files are written as headed FAQ entries, e.g.:
+        ## Account and Access
+
+        ### Q: How do I reset my MIS Web password?
+        A: 1. Log in ...
+    That's the right format for a human skimming the source document, but
+    when a raw chunk is returned as-is to a student in chat (the no-LLM
+    fallback path), it reads like a database dump: a section heading, the
+    student's own question read back to them, then "A:" before the actual
+    answer. This strips both the leading heading(s) and the "Q: ... A:"
+    restatement, leaving just the answer content -- matching how the main
+    LLM path is instructed to answer (straight to the point, no
+    "Based on the document" framing, no repeated question).
+    """
+    # Repeatedly strip leading markdown heading lines ("## Account and
+    # Access") that are pure section titles -- noise here, since the
+    # category is already shown elsewhere in the chat UI. Stop as soon as a
+    # heading turns out to BE the "Q: ..." line itself, so the Q:/A: logic
+    # below still has it to work with.
+    while True:
+        match = re.match(r"^\s*#{1,6}\s*(.*)\n+", content)
+        if not match:
+            break
+        if re.match(r"Q:\s*", match.group(1), flags=re.IGNORECASE):
+            break
+        content = content[match.end():]
+    # Strip a leading "Q: ...\nA: " question restatement, however it's
+    # capitalized/spaced, whether or not it's still wrapped in a markdown
+    # heading (e.g. "### Q: ...") -- the student already knows their own
+    # question.
+    match = re.match(r"\s*#{0,6}\s*Q:\s*.*?\n+A:\s*", content, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        content = content[match.end():]
+    return content.strip()
+
+
 def generate_grounded_answer(query: str, retrieved_chunks: list, category: str = None,
                               nationality: str = None) -> str:
     """retrieved_chunks: list of (doc, score) tuples from the vector store.
@@ -85,13 +122,7 @@ def generate_grounded_answer(query: str, retrieved_chunks: list, category: str =
         # Ollama not running) is logged server-side for debugging, never shown
         # in the chat -- a student should never see an internal exception.
         content = top_doc.page_content.strip()
-        # Strip a leading "Q: ...\nA: " question restatement if present, since
-        # the student already knows their own question.
-        if content.startswith("### Q:") or content.startswith("Q:"):
-            parts = content.split("A:", 1)
-            if len(parts) == 2:
-                content = parts[1].strip()
-        return _strip_kb_tags(content)
+        return _strip_kb_tags(_strip_faq_formatting(content))
 
     if not config.llm_is_configured():
         return _direct_fallback()
