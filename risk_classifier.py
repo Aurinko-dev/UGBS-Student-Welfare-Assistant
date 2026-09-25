@@ -22,6 +22,8 @@ import difflib
 import re
 from typing import Optional, Tuple
 
+import sentiment_analysis
+
 # Deliberately short, high-precision phrases. Longer/softer variants are
 # caught via substring matching below (e.g. "kill myself" also catches
 # "I want to kill myself").
@@ -152,16 +154,27 @@ _VOCABULARY = sorted(set(
 ))
 
 
-def normalize_query(text: str) -> str:
-    """Corrects likely typos in domain-relevant words (missed/extra/wrong
+def tokenize(text: str) -> list:
+    """Splits a raw message into whitespace-delimited tokens. Deliberately
+    simple (no punctuation stripping, no casing changes here) -- each stage
+    of the pipeline decides what it needs from a raw token, rather than this
+    function baking in assumptions for all of them. Kept as its own named
+    step (rather than inlined into normalize_query) so tokenization is a
+    documented, testable part of the pipeline in its own right, not just an
+    implementation detail of typo correction."""
+    return text.split()
+
+
+def correct_tokens(tokens: list) -> list:
+    """Corrects likely typos in domain-relevant tokens (missed/extra/wrong
     letters) against this project's own vocabulary, so a message like
     'defered my curses' or 'schlarship' still classifies and retrieves
     correctly instead of silently falling through to 'I don't understand'.
-    Leaves short words, numbers, and anything already spelled correctly
-    untouched -- this only nudges near-misses, it doesn't rewrite freely."""
-    words = text.split()
+    Leaves short tokens, numbers, and anything already spelled correctly
+    untouched -- this only nudges near-misses, it doesn't rewrite freely.
+    Takes and returns a list of tokens (see tokenize()), not raw text."""
     corrected = []
-    for w in words:
+    for w in tokens:
         core = w.strip(".,!?;:")
         if len(core) < 4 or core.lower() in _VOCABULARY:
             corrected.append(w)
@@ -171,7 +184,17 @@ def normalize_query(text: str) -> str:
             corrected.append(w.replace(core, match[0]))
         else:
             corrected.append(w)
-    return " ".join(corrected)
+    return corrected
+
+
+def normalize_query(text: str) -> str:
+    """The typo-tolerance step the rest of the app calls: tokenize the raw
+    message, correct likely typos token-by-token, then rejoin into text for
+    the classifier/retrieval steps downstream. Kept as a single entry point
+    so callers don't need to know about tokenize()/correct_tokens()
+    individually -- but each stage is now separately named, documented, and
+    testable (see tokenize() and correct_tokens() above)."""
+    return " ".join(correct_tokens(tokenize(text)))
 
 
 # ---------------------------------------------------------------------------
@@ -481,4 +504,22 @@ def finalize_triage(text: str, category: str, severity: str,
     escalated, reason = should_escalate(category, severity, confidence, p_high=p_high)
     if soft_crisis and reason != "crisis":
         escalated, reason = True, "possible_crisis"
+
+    # Sentiment as a further, independent safety net: catches messages that
+    # sound distressed but trip none of the keyword/phrase/urgency patterns
+    # above (e.g. "I am really struggling and don't know what to do
+    # anymore" -- no crisis wording, no urgency-floor hit, nothing GBV- or
+    # academic-specific for the net to key off). Only acts when nothing else
+    # already escalated the message, and only raises severity to Medium (not
+    # High/Critical) -- this is a noisier, unvalidated signal (see
+    # sentiment_analysis.py), so it should never be the thing that suppresses
+    # the emergency screen's stricter exact-phrase bar, and shouldn't claim
+    # the same confidence as the urgency floor or crisis lists.
+    distress = sentiment_analysis.distress_score(text)
+    if not escalated and sentiment_analysis.is_high_distress(text):
+        notes.append(f"high_distress_sentiment (score {distress:.2f})")
+        escalated, reason = True, "high_distress_sentiment"
+        if _rank(severity) < _rank("Medium"):
+            severity = "Medium"
+
     return category, severity, escalated, reason, " + ".join(notes)

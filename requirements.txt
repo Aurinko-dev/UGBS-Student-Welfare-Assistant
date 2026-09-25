@@ -11,3 +11,4 @@ plotly>=5.22
 google-generativeai>=0.8
 anthropic>=0.34
 ollama>=0.4
+vaderSentiment>=3.3

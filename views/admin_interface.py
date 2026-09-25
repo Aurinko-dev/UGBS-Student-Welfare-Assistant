@@ -5,6 +5,7 @@ import plotly.express as px
 import pandas as pd
 
 import analytics_db
+import topic_modeling
 
 st.markdown("## 📊 Admin Interface")
 st.caption("This is the decision-support view for administrators: what students are asking about, "
@@ -75,6 +76,26 @@ else:
     cols = [c for c in ["timestamp", "query", "category", "severity", "acknowledged",
                         "acknowledged_at", "ack_note"] if c in flagged.columns]
     st.dataframe(flagged[cols], **wide(st.dataframe))
+
+st.divider()
+st.markdown("#### Recurring themes in unanswered questions")
+st.caption("Unsupervised topic discovery over the 'needs review' queue below -- run on demand "
+           "since it's real computation, not just a chart of logged numbers. This looks for "
+           "patterns without being told what to look for, so it can surface a cluster of related "
+           "questions even when they don't fit neatly into one of the fixed categories above.")
+if st.button("Find recurring themes"):
+    unresolved_for_topics = analytics_db.get_unresolved(df)
+    result = topic_modeling.discover_topics(unresolved_for_topics["query"].tolist())
+    if not result["ok"]:
+        st.info(result["reason"])
+    else:
+        texts_list = unresolved_for_topics["query"].tolist()
+        for topic in result["topics"]:
+            with st.container(border=True):
+                st.markdown("**" + " · ".join(topic["keywords"]) + "**")
+                st.caption(f"{len(topic['doc_indices'])} question(s) most closely match this theme")
+                for i in topic["doc_indices"][:5]:
+                    st.write(f"— {texts_list[i]}")
 
 st.divider()
 st.markdown("#### Needs review — questions not in the knowledge base")
