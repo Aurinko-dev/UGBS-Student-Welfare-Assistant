@@ -23,6 +23,7 @@ import re
 from typing import Optional, Tuple
 
 import sentiment_analysis
+import config
 
 # Deliberately short, high-precision phrases. Longer/softer variants are
 # caught via substring matching below (e.g. "kill myself" also catches
@@ -65,7 +66,10 @@ _CRISIS_PATTERNS = [
 ]
 
 _FINANCIAL_KEYWORDS = ["fee", "fees", "tuition", "sponsorship", "scholarship",
-                        "financial aid", "sfao", "can't pay", "cannot pay", "afford"]
+                        "financial aid", "sfao", "can't pay", "cannot pay", "afford",
+                        "account office", "accounts office", "students accounts",
+                        "student accounts", "cash office", "cashier",
+                        "payment office", "fee payment", "fees payment"]
 _ACADEMIC_KEYWORDS = ["probation", "gpa", "failing", "fail", "resit", "defer",
                        "deferment", "withdraw", "academic standing", "course load"]
 _ACCOMMODATION_KEYWORDS = ["hostel", "accommodation", "housing", "roommate", "landlord", "rent"]
@@ -197,14 +201,90 @@ def correct_tokens(tokens: list) -> list:
     return corrected
 
 
+# ---------------------------------------------------------------------------
+# Student-language normalization
+# ---------------------------------------------------------------------------
+# Students often use abbreviations, short forms, office nicknames, and
+# informal wording. Keep the original words AND add the formal meaning so the
+# downstream classifier and RAG retriever can match both forms.
+#
+# IMPORTANT: this is intentionally a small UGBS/UG domain dictionary, not a
+# general-purpose spell checker or translator.
+_ABBREVIATIONS = getattr(config, "ABBREVIATIONS", {
+    "UG": "University of Ghana",
+    "UGBS": "University of Ghana Business School",
+    "SFAO": "Student Financial Aid Office",
+    "SRC": "Students Representative Council",
+    "UGCCD": "University of Ghana Counselling and Placement Centre",
+    "STS": "student academic and payment system",
+    "JCR": "Junior Common Room",
+    "BHJCR": "Business House Junior Common Room",
+    "CEGENSA": "Centre for Gender Studies and Advocacy",
+})
+
+# Common student wording -> formal search terminology. These are kept in
+# config.py so the application's language dictionary has one source of truth.
+# The fallback above/below keeps this classifier usable if an older config.py
+# is temporarily present during local development.
+_STUDENT_TERMS = getattr(config, "STUDENT_TERMS", {
+    "school fees": "academic fees fee payment",
+    "fee payment": "academic fees payment",
+    "fees payment": "academic fees payment",
+    "fin aid": "financial aid Student Financial Aid Office",
+    "financial aid": "financial aid Student Financial Aid Office",
+    "acct office": "accounts office Students Accounts Office",
+    "account office": "accounts office Students Accounts Office",
+    "accounts office": "Students Accounts Office",
+    "students accounts": "Students Accounts Office",
+    "student accounts": "Students Accounts Office",
+    "cash office": "cash office Students Accounts Office fee payment",
+    "cashier": "cash office Students Accounts Office fee payment",
+    "payment office": "fee payment Students Accounts Office",
+    "business school": "University of Ghana Business School UGBS",
+})
+
+
+def _expand_student_terms(text: str) -> str:
+    """Adds formal UGBS/UG terminology for abbreviations and common student
+    wording. Matching is case-insensitive and word/phrase aware.
+
+    The original query is preserved; expansions are appended rather than
+    replacing it. This makes the feature safer because the retriever can still
+    match the exact student wording found in source documents.
+    """
+    expanded = text
+
+    # Longer phrases first so "business school" is handled as a phrase and
+    # abbreviations are not accidentally expanded inside larger words.
+    for phrase, meaning in sorted(_STUDENT_TERMS.items(), key=lambda x: len(x[0]), reverse=True):
+        pattern = r"(?<![A-Za-z])" + re.escape(phrase) + r"(?![A-Za-z])"
+        if re.search(pattern, expanded, flags=re.IGNORECASE):
+            expanded += " " + meaning
+
+    for short, meaning in sorted(_ABBREVIATIONS.items(), key=lambda x: len(x[0]), reverse=True):
+        pattern = r"(?<![A-Za-z])" + re.escape(short) + r"(?![A-Za-z])"
+        if re.search(pattern, expanded, flags=re.IGNORECASE):
+            expanded += " " + meaning
+
+    return expanded
+
+
 def normalize_query(text: str) -> str:
-    """The typo-tolerance step the rest of the app calls: tokenize the raw
-    message, correct likely typos token-by-token, then rejoin into text for
-    the classifier/retrieval steps downstream. Kept as a single entry point
-    so callers don't need to know about tokenize()/correct_tokens()
-    individually -- but each stage is now separately named, documented, and
-    testable (see tokenize() and correct_tokens() above)."""
-    return " ".join(correct_tokens(tokenize(text)))
+    """Normalize real student language before classification and RAG.
+
+    Pipeline:
+      1. Expand UGBS/UG abbreviations and common office/student terms.
+      2. Correct likely domain-specific typos.
+      3. Return one query string for downstream classification/retrieval.
+
+    Examples:
+      "where is SFAO?" -> includes "Student Financial Aid Office"
+      "where is the acct office?" -> includes "Students Accounts Office"
+      "where is the cash office?" -> includes payment/accounts terminology
+      "I can't pay my fees" -> keeps the original wording and adds fee terms
+    """
+    expanded = _expand_student_terms(text)
+    return " ".join(correct_tokens(tokenize(expanded)))
 
 
 # ---------------------------------------------------------------------------

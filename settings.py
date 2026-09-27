@@ -4,12 +4,74 @@ from datetime import datetime
 import streamlit as st
 
 import config
+import llm_engine
 import neural_classifier
 import risk_classifier
 
 st.markdown("## ⚙️ Settings")
 st.caption("System status, the indexed knowledge base, and a live classifier test tool — "
            "kept here so the User Interface page stays focused on the conversation.")
+
+# --- Generation & decision tuning -------------------------------------------
+# Session-only knobs (see caption below) for exploring how generation
+# creativity and the two confidence cutoffs affect behavior, without
+# editing code or restarting the app. This is a demo/exploration aid, not a
+# way to permanently retune the app -- a real change to, say, the retrieval
+# cutoff still belongs in code, backed by evidence the way the current
+# default was (see check_retrieval_scores.py and the comment in
+# views/user_interface.py explaining why it's 1.0).
+#
+# The two cutoff defaults below are duplicated from views/user_interface.py
+# rather than imported from it, because that file is a Streamlit *page*
+# (it has top-level st.* calls that would render on import) -- config.py or
+# llm_engine.py would be the place to unify these if they ever need to be
+# imported from more than one page.
+_DEFAULT_RETRIEVAL_CUTOFF = 1.0   # must match views/user_interface.py
+_DEFAULT_CLASSIFIER_CUTOFF = 0.4  # must match views/user_interface.py
+
+st.divider()
+st.markdown("#### Generation & decision tuning")
+st.caption("Adjust how the AI generates answers and where it draws the line between "
+           "'confident enough to answer' and 'should ask for help instead.'")
+
+for _key, _default in (
+    ("tune_temperature", llm_engine.DEFAULT_TEMPERATURE),
+    ("tune_max_tokens", llm_engine.DEFAULT_MAX_TOKENS),
+    ("tune_classifier_cutoff", _DEFAULT_CLASSIFIER_CUTOFF),
+    ("tune_retrieval_cutoff", _DEFAULT_RETRIEVAL_CUTOFF),
+):
+    if _key not in st.session_state:
+        st.session_state[_key] = _default
+
+tcol1, tcol2 = st.columns(2)
+with tcol1:
+    st.session_state.tune_temperature = st.slider(
+        "Temperature", 0.0, 1.0, st.session_state.tune_temperature, 0.05,
+        help="Higher = more varied/creative wording in generated answers. "
+             "Lower = more literal and repeatable.")
+    st.session_state.tune_classifier_cutoff = st.slider(
+        "Classifier confidence cutoff", 0.0, 1.0, st.session_state.tune_classifier_cutoff, 0.05,
+        help="Below this confidence, the neural classifier's prediction is discarded and "
+             "the question falls back to the LLM classifier instead.")
+with tcol2:
+    st.session_state.tune_max_tokens = st.slider(
+        "Max response length (tokens)", 100, 1000, st.session_state.tune_max_tokens, 50,
+        help="Caps how long a generated answer or action plan can run.")
+    st.session_state.tune_retrieval_cutoff = st.slider(
+        "Retrieval confidence cutoff (distance)", 0.0, 2.0, st.session_state.tune_retrieval_cutoff, 0.05,
+        help="Above this vector-similarity distance, the assistant says it doesn't know "
+             "instead of guessing. Default of 1.0 was chosen empirically -- see "
+             "check_retrieval_scores.py and the comment in views/user_interface.py.")
+
+if st.button("↺ Reset to defaults"):
+    st.session_state.tune_temperature = llm_engine.DEFAULT_TEMPERATURE
+    st.session_state.tune_max_tokens = llm_engine.DEFAULT_MAX_TOKENS
+    st.session_state.tune_classifier_cutoff = _DEFAULT_CLASSIFIER_CUTOFF
+    st.session_state.tune_retrieval_cutoff = _DEFAULT_RETRIEVAL_CUTOFF
+    st.rerun()
+
+st.caption("These settings live only in this browser session — they reset to the defaults "
+           "above when the app restarts.")
 
 # --- System status -------------------------------------------------------
 st.divider()
@@ -35,8 +97,9 @@ with col3:
     st.metric("Retrieval", "Local")
     st.caption(f"Embedding model: `{config.EMBEDDING_MODEL_NAME}` — no external API calls")
 
-st.caption(f"Retrieval confidence threshold: `1.0` (set in `views/user_interface.py` — above this distance, the assistant "
-           f"says it doesn't know rather than guessing)")
+st.caption(f"Retrieval confidence threshold: `{st.session_state.tune_retrieval_cutoff:.2f}` "
+           f"(adjustable above — above this distance, the assistant says it doesn't know "
+           f"rather than guessing)")
 
 # --- Privacy notice --------------------------------------------------------
 st.warning("⚠️ **Prototype only — not production access control.** No authentication in front of "
@@ -118,44 +181,3 @@ if test_query:
                  f"Escalated: **{'YES — ' + f_reason if f_esc else 'no'}**")
         if f_note:
             st.caption(f"Adjustments applied: {f_note}")
-# --- Generation & decision tuning -----------------------------------------
-st.divider()
-st.markdown("#### Generation & decision tuning")
-st.caption(
-    "Session-only — resets when you close the tab. "
-    "Classification and chit-chat replies are excluded so eval numbers stay reproducible."
-)
-
-col_a, col_b = st.columns(2)
-
-with col_a:
-    st.session_state["tuning_temperature"] = st.slider(
-        "LLM temperature",
-        min_value=0.0, max_value=1.0,
-        value=st.session_state.get("tuning_temperature", 0.3),
-        step=0.05,
-        help="Higher = more creative / varied answers. Lower = more consistent and factual.",
-    )
-    st.session_state["tuning_classifier_cutoff"] = st.slider(
-        "Classifier confidence cutoff",
-        min_value=0.30, max_value=0.95,
-        value=st.session_state.get("tuning_classifier_cutoff", 0.55),
-        step=0.05,
-        help="Below this confidence the neural classifier defers to rule-based fallback.",
-    )
-
-with col_b:
-    st.session_state["tuning_max_tokens"] = st.slider(
-        "Max response tokens",
-        min_value=100, max_value=1000,
-        value=st.session_state.get("tuning_max_tokens", 500),
-        step=50,
-        help="Maximum tokens the LLM can generate per answer.",
-    )
-    st.session_state["tuning_retrieval_cutoff"] = st.slider(
-        "Retrieval confidence cutoff",
-        min_value=0.50, max_value=1.50,
-        value=st.session_state.get("tuning_retrieval_cutoff", 1.0),
-        step=0.05,
-        help="ChromaDB distance threshold — above this the assistant says it doesn't know.",
-    )
