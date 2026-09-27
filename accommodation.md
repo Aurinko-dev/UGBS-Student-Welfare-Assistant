@@ -1,4 +1,4 @@
-# University of Ghana — Student Accommodation
+﻿# University of Ghana — Student Accommodation
 
 Source: University of Ghana Academic Affairs Directorate, official Accommodation page (ug.edu.gh/aad/accomodation) and Schedule of Fees page (ug.edu.gh/aad/schedule-fees). Verified against the live pages, word-for-word match. [VERIFIED]
 

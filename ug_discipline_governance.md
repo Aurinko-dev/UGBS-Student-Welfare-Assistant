@@ -1,4 +1,4 @@
-# University of Ghana — Student Discipline & Complaint Governance (Verified)
+﻿# University of Ghana — Student Discipline & Complaint Governance (Verified)
 
 Source: Statutes of the University of Ghana, August 2024 (current, official — ug.edu.gh/pad). [VERIFIED — table of contents and Statute 14(1) text directly retrieved and confirmed]
 

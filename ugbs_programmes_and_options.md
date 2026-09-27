@@ -1,4 +1,4 @@
-# UGBS Undergraduate Programmes and Options (BSc Administration)
+﻿# UGBS Undergraduate Programmes and Options (BSc Administration)
 
 This document explains which undergraduate programmes and options the University of Ghana Business School (UGBS) offers, which department runs each one, what each option involves, and how a Level 200 student can choose an option for Level 300.
 

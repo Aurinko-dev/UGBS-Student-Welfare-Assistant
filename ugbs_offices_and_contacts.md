@@ -1,4 +1,4 @@
-# UGBS and University-Wide Offices: Locations, Contacts, and Who to Ask
+﻿# UGBS and University-Wide Offices: Locations, Contacts, and Who to Ask
 
 This document tells a student roughly WHERE to physically go, WHO to contact, and WHICH office handles what, for the offices mentioned elsewhere in this knowledge base. It merges what used to be several separate, overlapping documents into one, since duplicated location research kept drifting out of sync with itself (see the sourcing note at the end). Locations are the kind of fact that go stale (offices move buildings) and are risky to get wrong, so every entry states its confidence and, where sources disagree, says so rather than picking one. If in doubt, confirm at the UGBS reception/porters' desk or the office's own front desk before making a special trip.
 

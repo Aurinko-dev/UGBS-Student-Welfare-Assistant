@@ -1,4 +1,4 @@
-# SFAO Financial Aid Knowledge Base
+﻿# SFAO Financial Aid Knowledge Base
 
 Source data for the Scenario 5 vector database. Every fact below is sourced from the live SFAO pages, fetched 19 August 2026, with the source URL given per section so it can be re-checked before the demonstration.
 

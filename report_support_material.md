@@ -1,4 +1,4 @@
-# UGBS Student Welfare AI — Report Support Material
+﻿# UGBS Student Welfare AI — Report Support Material
 
 For Scenario 6 (Student Complaints and Administrative Case Management), AI Applications in Business project.
 

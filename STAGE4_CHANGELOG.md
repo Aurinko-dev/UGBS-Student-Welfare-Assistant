@@ -1,4 +1,4 @@
-# Stage 4 Code Update — UGBS AI Student Welfare & Support Triage System
+﻿# Stage 4 Code Update — UGBS AI Student Welfare & Support Triage System
 
 ## What was updated
 

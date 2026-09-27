@@ -1,4 +1,4 @@
-# Stage 5 — Analytics & Evaluation Changelog
+﻿# Stage 5 — Analytics & Evaluation Changelog
 
 ## Purpose
 Stage 5 adds the evaluation and analytics layer without rewriting the Stage 4 AI agent.

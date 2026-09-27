@@ -1,4 +1,4 @@
-# University of Ghana — Careers and Counselling Directorate
+﻿# University of Ghana — Careers and Counselling Directorate
 
 ## Frequently Asked Questions and Answers
 

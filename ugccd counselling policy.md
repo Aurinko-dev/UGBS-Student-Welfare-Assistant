@@ -1,4 +1,4 @@
-# UG Counselling and Placement Centre (UGCCD) — Knowledge Base
+﻿# UG Counselling and Placement Centre (UGCCD) — Knowledge Base
 
 ## Note on Data Sourcing
 

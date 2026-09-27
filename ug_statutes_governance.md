@@ -1,4 +1,4 @@
-# University of Ghana — Statutes: Governance & Student-Relevant Provisions
+﻿# University of Ghana — Statutes: Governance & Student-Relevant Provisions
 
 Source: "Amendments to the Statutes of the University of Ghana," University of Ghana, published September 2016 (amending the base Statutes of 1 May 2011; passed by Council 26 June 2014). Official document, ug.edu.gh. [VERIFIED]
 

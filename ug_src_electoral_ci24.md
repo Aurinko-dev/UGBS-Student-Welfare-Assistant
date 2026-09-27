@@ -1,4 +1,4 @@
-# University of Ghana SRC — Electoral Constitutional Instrument (C.I. 24)
+﻿# University of Ghana SRC — Electoral Constitutional Instrument (C.I. 24)
 
 Source: "Constitutional Instrument (C.I. 24)," University of Ghana Students' Representative Council (SRC) Electoral Commission, effective for the 2024 SRC elections, published univers.ug.edu.gh (UG's campus radio station site), dated 24th June 2024. [VERIFIED]
 

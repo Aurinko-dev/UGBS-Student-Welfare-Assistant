@@ -1,4 +1,4 @@
-# Stage 5 Code Validation Results
+﻿# Stage 5 Code Validation Results
 
 Validation was run against the Stage 4 package after the Stage 5 updates.
 

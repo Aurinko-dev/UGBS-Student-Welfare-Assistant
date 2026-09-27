@@ -1,4 +1,4 @@
-# UGBS Student Welfare Assistant
+﻿# UGBS Student Welfare Assistant
 
 An AI-based triage and referral assistant for University of Ghana Business School
 students — built for Scenario 5 (Student Welfare and Support Services),

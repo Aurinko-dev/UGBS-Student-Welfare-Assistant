@@ -1,4 +1,4 @@
-# University of Ghana — Academic Affairs Directorate
+﻿# University of Ghana — Academic Affairs Directorate
 
 ## Frequently Asked Questions and Answers
 

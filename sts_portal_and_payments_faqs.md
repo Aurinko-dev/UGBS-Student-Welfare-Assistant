@@ -1,4 +1,4 @@
-# UG Student Portal, Accounts and Payments (STS FAQs)
+﻿# UG Student Portal, Accounts and Payments (STS FAQs)
 
 Source: sts.ug.edu.gh FAQ page, summarised from screenshots. [Verify against sts.ug.edu.gh and Academic Affairs before treating as final.] Some answers are written for College of Humanities students, including distance learners.
 

@@ -1,4 +1,4 @@
-# UGBS Academic Policies & Support (Official Q&A for RAG)
+﻿# UGBS Academic Policies & Support (Official Q&A for RAG)
 
 ### Q: How do continuing UGBS students request course deferment?
 A: Log into the STS Portal, go to Services, select Deferment Form, complete and submit the application within the approved period. Deferment requests are processed through Academic Affairs after departmental consideration.

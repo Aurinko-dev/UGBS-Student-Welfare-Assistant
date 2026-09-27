@@ -1,4 +1,4 @@
-# University of Ghana Business School — Business House Junior Common Room (BHJCR) Constitution
+﻿# University of Ghana Business School — Business House Junior Common Room (BHJCR) Constitution
 
 Source: The Constitution of the Business House Junior Common Room, University of Ghana Business School, University of Ghana, Legon. Approved by the 14th General Assembly, made 29th September 2016. [VERIFIED — uploaded by user from official BHJCR document]
 

@@ -1,4 +1,4 @@
-# University of Ghana — Sexual Harassment & Misconduct: Reporting and Support
+﻿# University of Ghana — Sexual Harassment & Misconduct: Reporting and Support
 
 Source: University of Ghana Sexual Harassment and Misconduct Policy (Special Reporter No. 873, 5 May 2017), published by CEGENSA — the Centre for Gender Studies and Advocacy (cegensa.ug.edu.gh). Full policy PDF verified directly. [VERIFIED]
 
