@@ -5,7 +5,7 @@ from logo import logo_html
 from ui_theme import wide
 import os
 
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 
 import config
 import analytics_db
@@ -22,7 +22,12 @@ from risk_classifier import (rule_based_classify, check_crisis, is_chitchat,
 # Below this we tell the student we don't know rather than guessing -- but
 # we still give them a direct website link and log it for admin follow-up,
 # rather than a dead end (see llm_engine.get_not_in_kb_reply).
-CONFIDENCE_THRESHOLD = 1.0
+#
+# This is now the DEFAULT only -- the actual value used at runtime lives in
+# st.session_state.tune_retrieval_cutoff (see the init block below), which
+# views/settings.py's "Generation & decision tuning" panel can adjust for
+# the current browser session without a code change or restart.
+_DEFAULT_RETRIEVAL_CUTOFF = 1.0
 # Raised from 0.9 to 1.0 after running check_retrieval_scores.py on real
 # queries from the live app. At 0.9, several genuinely good matches were
 # being rejected (observed distances: 0.91 for "who is my course advisor",
@@ -39,6 +44,11 @@ CONFIDENCE_THRESHOLD = 1.0
 # view) have no good match in the knowledge base at any threshold, because
 # the content doesn't exist yet. Re-run check_retrieval_scores.py and
 # re-tune this number whenever documents are added, removed, or edited.
+
+# Same story as above -- this is the default for the neural classifier's
+# "trust this prediction or fall back to the LLM" cutoff; the live value is
+# st.session_state.tune_classifier_cutoff, adjustable from Settings.
+_DEFAULT_CLASSIFIER_CUTOFF = 0.4
 
 # Simple keyword check for "is this question actually about a specific fee
 # amount" -- used to decide whether to ask nationality before answering.
@@ -324,6 +334,17 @@ if "awaiting_department" not in st.session_state:
     st.session_state.awaiting_department = False
 if "feedback_given" not in st.session_state:
     st.session_state.feedback_given = {}
+# Generation & decision tuning -- adjustable from Settings, but initialized
+# here too (to the SAME defaults) since a student can land on this page
+# without ever visiting Settings first.
+for _key, _default in (
+    ("tune_temperature", llm_engine.DEFAULT_TEMPERATURE),
+    ("tune_max_tokens", llm_engine.DEFAULT_MAX_TOKENS),
+    ("tune_classifier_cutoff", _DEFAULT_CLASSIFIER_CUTOFF),
+    ("tune_retrieval_cutoff", _DEFAULT_RETRIEVAL_CUTOFF),
+):
+    if _key not in st.session_state:
+        st.session_state[_key] = _default
 
 for msg in st.session_state.messages:
     avatar = ASSISTANT_AVATAR if msg["role"] == "assistant" else USER_AVATAR
@@ -484,7 +505,7 @@ if user_query:
         if neural_classifier.is_available():
             category, severity, confidence, p_high = neural_classifier.classify_full(normalized_query)
             classifier_source = f"neural_net (confidence {confidence:.0%})"
-            if confidence < 0.4:
+            if confidence < st.session_state.tune_classifier_cutoff:
                 category = "Unclassified"
         else:
             triage = rule_based_classify(normalized_query)
@@ -539,7 +560,7 @@ if user_query:
         with st.spinner("Searching official welfare policy documents..."):
             results = vectorstore.similarity_search_with_score(normalized_query, k=3)
 
-        if not results or results[0][1] > CONFIDENCE_THRESHOLD:
+        if not results or results[0][1] > st.session_state.tune_retrieval_cutoff:
             msg = llm_engine.get_not_in_kb_reply(user_query)
             msg += _ADMIN_HANDOFF
             if escalated:
@@ -572,11 +593,13 @@ if user_query:
         if office_info:
             with st.spinner("Generating answer and next steps..."):
                 answer, plan = llm_engine.generate_answer_and_plan(
-                    user_query, results, category=category, nationality=st.session_state.nationality)
+                    user_query, results, category=category, nationality=st.session_state.nationality,
+                    temperature=st.session_state.tune_temperature, max_tokens=st.session_state.tune_max_tokens)
         else:
             with st.spinner("Generating answer..."):
                 answer = llm_engine.generate_grounded_answer(
-                    user_query, results, category=category, nationality=st.session_state.nationality)
+                    user_query, results, category=category, nationality=st.session_state.nationality,
+                    temperature=st.session_state.tune_temperature, max_tokens=st.session_state.tune_max_tokens)
             plan = ""
 
         # possible_crisis is deliberately soft-escalated: the student sees a
